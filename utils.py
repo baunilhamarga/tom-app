@@ -5,7 +5,7 @@ from pathlib import Path
 from functools import lru_cache
 import subprocess, shutil, re
 
-import pandas as pd
+import json, pandas as pd
 import cairosvg                # fallback if pdf2svg CLI is absent
 # convert_from_path is still imported for backward compatibility (PNG helper)
 from pdf2image import convert_from_path
@@ -29,26 +29,51 @@ EXPERIMENTS: dict[str, Path] = _discover_experiments()
 DEFAULT_LABEL = next(iter(EXPERIMENTS)) if EXPERIMENTS else ""
 
 
-# ───────────────────────────────────────────────────────────── CSV loader ────
+# ───────────────────────────────────────────────────────────── Loader ────
 @lru_cache(maxsize=None)
-def load_game(label: str | None = None) -> pd.DataFrame:
+def load_game(
+    label: str | None = None,
+    source: str = "jsonl",              # "jsonl"  (default)  or "csv"
+) -> pd.DataFrame:
     """
-    Load summary.csv for the chosen experiment *label*.
-    If label is None, fall back to the first discovered experiment.
+    Load one experiment into a DataFrame.
+
+    Parameters
+    ----------
+    label   : experiment key from `EXPERIMENTS`. Defaults to first experiment.
+    source  : "jsonl" -> read record.jsonl (preferred, keeps commas/newlines)
+              "csv"  -> read summary.csv  (legacy)
     """
     label = label or DEFAULT_LABEL
     if label not in EXPERIMENTS:
         raise ValueError(f"No experiment named '{label}' in {ROOT_DATA!s}")
 
-    csv_path = EXPERIMENTS[label] / "summary.csv"
-    df = pd.read_csv(csv_path)
+    exp_dir = EXPERIMENTS[label]
 
-    # drop stray "Unnamed: x" columns and sort deterministically
-    df = (
-        df.drop(columns=[c for c in df.columns if c.lower().startswith("unnamed")])
-          .sort_values(["round", "agent_id"])
-          .reset_index(drop=True)
-    )
+    # ── read the chosen file ──────────────────────────────────────────────
+    if source == "jsonl":
+        json_path = exp_dir / "record.jsonl"
+        if not json_path.exists():
+            raise FileNotFoundError(json_path)
+        with open(json_path, "r", encoding="utf-8") as f:
+            rows = [json.loads(line) for line in f if line.strip()]
+        df = pd.DataFrame(rows)
+
+    elif source == "csv":
+        csv_path = exp_dir / "summary.csv"
+        if not csv_path.exists():
+            raise FileNotFoundError(csv_path)
+        df = pd.read_csv(csv_path)
+        # drop stray unnamed columns from the legacy writer
+        df = df.drop(columns=[c for c in df.columns if c.lower().startswith("unnamed")])
+
+    else:
+        raise ValueError("source must be 'jsonl' or 'csv'")
+
+    # ── tidy & sort ───────────────────────────────────────────────────────
+    if "round" in df.columns:
+        df["round"] = pd.to_numeric(df["round"], errors="coerce").astype(int)
+    df = df.sort_values(["round", "agent_id"]).reset_index(drop=True)
     return df
 
 
