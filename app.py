@@ -15,7 +15,7 @@ if "round_pending" in st.session_state:
 
 # ───────────────────────── helpers ──────────────────────────
 def extract_score(obs_text: str) -> int | None:
-    m = re.search(r"Total team score:\\s*(\\d+)", obs_text)
+    m = re.search(r"Total team score:\s*(\d+)", obs_text)
     return int(m.group(1)) if m else None
 
 AGENT_COLORS = {"alpha": "#e6194b", "bravo": "#3cb44b", "charlie": "#4363d8"}
