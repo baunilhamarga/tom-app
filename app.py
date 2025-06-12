@@ -87,10 +87,26 @@ with left:
         if pd.notna(row.get("new_belief", None)):
             with st.expander(f"{agent} belief state"):
                 st.write(row["new_belief"])
+
+        def truth_chip(val: bool | None) -> str:
+            if val is True:
+                return '<span style="color:#3cb44b;font-weight:bold">✅ Yes</span>'
+            if val is False:
+                return '<span style="color:#e6194b;font-weight:bold">❌ No</span>'
+            return '<span style="color:#777">❓ Unknown</span>'
+
         for lvl in ("ToM1st", "ToM2nd", "ToM3rd"):
-            if pd.notna(row.get(lvl, None)):
-                with st.expander(f"{agent} {TOM_LABELS[lvl]}"):
-                    st.write(row[lvl])
+            ans = row.get(lvl)
+            if pd.notna(ans):                                # only show if answer exists
+                q   = row.get(f"{lvl}_q", "(question not recorded)")
+                gt  = row.get("ground_truth", None)          # same for all three levels
+                lab = TOM_LABELS[lvl]                       # pretty label defined earlier
+
+                with st.expander(f"{agent} {lab}"):
+                    st.markdown(f"**Q:** {q}")
+                    st.markdown(f"**A:** {ans}")
+                    st.markdown(f"**Ground Truth:** {truth_chip(gt)}", unsafe_allow_html=True)
+
 
 # ── Vector map ─────────────────────────────────────────────
 with right:
