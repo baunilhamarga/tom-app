@@ -7,6 +7,7 @@ import time, re, streamlit as st, pandas as pd
 from pathlib import Path
 import utils                         # we’ll mutate utils.EXPERIMENTS
 from utils import load_game, pdf_to_svg, expand_svg
+import json
 
 # ── apply scheduled round change (comes from previous run) ────────────────
 if "round_pending" in st.session_state:
@@ -46,8 +47,16 @@ if not exp_labels:
 if "exp" not in st.session_state or st.session_state.exp not in exp_labels:
     st.session_state.exp = exp_labels[0]
 
+exp_dir = utils.EXPERIMENTS[st.session_state.exp]
 st.sidebar.selectbox("Experiment", exp_labels, key="exp",
                      format_func=lambda x: x)           # show path as-is
+
+# ── read args.json (silently ignore if missing) ───────────────────────────
+args_path = exp_dir / "args.json"
+args_dict = {}
+if args_path.exists():
+    with open(args_path, "r", encoding="utf-8") as f:
+        args_dict = json.load(f)
 
 # ───────────────────── sidebar: round slider & autoplay ─────────────────────
 df = load_game(st.session_state.exp)
@@ -60,6 +69,13 @@ st.sidebar.slider("Round", min_value=round_ids[0], max_value=round_ids[-1],
                   key="round", format="%d")
 st.sidebar.checkbox("Auto-play", key="auto")
 speed = st.sidebar.slider("Speed (sec / round)", 0.3, 3.0, 1.0, 0.1)
+
+with st.sidebar.expander("Experiment args", expanded=False):
+    if args_dict:
+        for k, v in sorted(args_dict.items()):
+            st.markdown(f"**{k}**: {v}")
+    else:
+        st.markdown("_args.json not found_")
 
 # ───────────────────────── main layout ─────────────────────
 left, right = st.columns([2, 3])
