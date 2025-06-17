@@ -8,6 +8,55 @@ from pathlib import Path
 import utils                         # we’ll mutate utils.EXPERIMENTS
 from utils import load_game, pdf_to_svg, expand_svg
 import json
+PRICING_PATH = Path(__file__).parent / "assets/pricing.json"
+
+@st.cache_data(show_spinner=False)
+def load_pricing() -> list[dict]:
+    with open(PRICING_PATH, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+import re
+from typing import Optional, Dict, List
+
+def match_price_row(model_name: str, table: List[Dict]) -> Optional[Dict]:
+    """
+    Return the *best* pricing entry for a model name.
+
+    Rules
+    -----
+    1. Strip a final YYYY-MM-DD suffix (e.g.  gpt-4.1-nano-2025-04-14  →  gpt-4.1-nano)
+    2. Among all price-table rows whose Model string is **contained** in the
+       stripped name, pick the *longest* row['Model']  (i.e. most specific).
+    3. If nothing matches, return None.
+    """
+    # 1) normalise and strip datestamp
+    m = model_name.lower()
+    m = re.sub(r"-\d{4}-\d{2}-\d{2}$", "", m)           # remove -YYYY-MM-DD
+
+    best_row = None
+    best_len = -1
+
+    for row in table:
+        cand = row["Model"].lower()
+        if cand in m:
+            if len(cand) > best_len:                   # 2) most specific
+                best_len = len(cand)
+                best_row = row
+
+    return best_row
+
+def estimate_cost(results: dict, price: dict) -> tuple[float, float, float, float]:
+    """Return (input$, cached$, output$, total$)."""
+    in_tokens   = results["prompt_tokens"] - results.get("prompt_tokens_details.cached_tokens", 0)
+    cache_tokens= results.get("prompt_tokens_details.cached_tokens", 0)
+    out_tokens  = results["completion_tokens"]
+
+    input_cost  = in_tokens    / 1_000_000 * price["Input"]
+    cached_cost = cache_tokens / 1_000_000 * price["Cached input"]
+    output_cost = out_tokens   / 1_000_000 * price["Output"]
+    total       = input_cost + cached_cost + output_cost
+    return round(input_cost, 4), round(cached_cost, 4), round(output_cost, 4), round(total, 4)
+
 
 # ── apply scheduled round change (comes from previous run) ────────────────
 if "round_pending" in st.session_state:
@@ -91,6 +140,26 @@ with st.sidebar.expander("Final Results", expanded=False):
     else:
         st.markdown("_results.json not found_")
 
+# ─────────────────────────── cost estimate panel ─────────────────────────
+model_name = args_dict.get("model_name", args_dict.get("model", ""))
+with st.sidebar.expander("Price estimate (USD)", expanded=False):
+    if not results_dict:
+        st.markdown("_results.json not found_")
+    else:
+        price_row = match_price_row(model_name, load_pricing())
+        if price_row:
+            inp, cache, out, total = estimate_cost(results_dict, price_row)
+            st.metric("Estimated total", f"${total}")
+            st.markdown(
+                f"- **Non-cached Input:**  {results_dict['prompt_tokens']-results_dict.get('prompt_tokens_details.cached_tokens',0):,}  →  ${inp}\n"
+                f"- **Cached Input:**  {results_dict.get('prompt_tokens_details.cached_tokens',0):,}  →  ${cache}\n"
+                f"- **Output:** {results_dict['completion_tokens']:,}  →  ${out}"
+            )
+            st.caption(f"Model: **{price_row['Model']}**  "
+                       f"(rates per 1M — in: {price_row['Input']}, "
+                       f"cached: {price_row['Cached input']}, out: {price_row['Output']})")
+        else:
+            st.markdown("_Model not found in pricing table_")
 
 # ───────────────────────── main layout ─────────────────────
 left, right = st.columns([2, 3])
