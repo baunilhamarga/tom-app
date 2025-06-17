@@ -86,7 +86,9 @@ with left:
     st.markdown(f"### Round {sel_round}")
     this = df[df["round"] == sel_round]
 
-    score = extract_score(this.iloc[0]["obs_text"])
+    # Get score from the last match for the corresponding round
+    last_row = this.iloc[-1]
+    score = extract_score(last_row["obs_text"])
     if score is not None:
         st.metric("Team score", score)
 
