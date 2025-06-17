@@ -57,6 +57,13 @@ args_dict = {}
 if args_path.exists():
     with open(args_path, "r", encoding="utf-8") as f:
         args_dict = json.load(f)
+        
+# ── read results.json (silently ignore if missing) ───────────────────────────
+results_path = exp_dir / "results.json"
+results_dict = {}
+if results_path.exists():
+    with open(results_path, "r", encoding="utf-8") as f:
+        results_dict = json.load(f)
 
 # ───────────────────── sidebar: round slider & autoplay ─────────────────────
 df = load_game(st.session_state.exp)
@@ -76,6 +83,14 @@ with st.sidebar.expander("Experiment args", expanded=False):
             st.markdown(f"**{k}**: {v}")
     else:
         st.markdown("_args.json not found_")
+        
+with st.sidebar.expander("Final Results", expanded=False):
+    if results_dict:
+        for k, v in results_dict.items():
+            st.markdown(f"**{k}**: {v}")
+    else:
+        st.markdown("_results.json not found_")
+
 
 # ───────────────────────── main layout ─────────────────────
 left, right = st.columns([2, 3])
