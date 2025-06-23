@@ -162,10 +162,14 @@ with st.sidebar.expander("Experiment args", expanded=False):
             st.markdown(f"**{k}**: {v}")
     else:
         st.markdown("_args.json not found_")
-        
+
+percentage_features = ['action_success_rate', 'valid_action_rate',]
+
 with st.sidebar.expander("Final Results", expanded=False):
     if results_dict:
         for k, v in results_dict.items():
+            if k in percentage_features:
+                v = f"{v:.2%}" if isinstance(v, float) else v
             st.markdown(f"**{k}**: {v}")
     else:
         st.markdown("_results.json not found_")
