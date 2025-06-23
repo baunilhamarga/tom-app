@@ -47,9 +47,9 @@ def match_price_row(model_name: str, table: List[Dict]) -> Optional[Dict]:
 
 def estimate_cost(results: dict, price: dict) -> tuple[float, float, float, float]:
     """Return (input$, cached$, output$, total$)."""
-    in_tokens   = results["prompt_tokens"] - results.get("prompt_tokens_details.cached_tokens", 0)
-    cache_tokens= results.get("prompt_tokens_details.cached_tokens", 0)
-    out_tokens  = results["completion_tokens"]
+    in_tokens   = results.get("prompt_tokens",0) - results.get("prompt_tokens_details.cached_tokens",0)
+    cache_tokens= results.get("prompt_tokens_details.cached_tokens",0)
+    out_tokens  = results.get("completion_tokens",0)
 
     input_cost  = in_tokens    / 1_000_000 * price["Input"]
     cached_cost = cache_tokens / 1_000_000 * price["Cached input"]
@@ -115,7 +115,15 @@ if results_path.exists():
         results_dict = json.load(f)
 
 # ───────────────────── sidebar: round slider & autoplay ─────────────────────
-df = load_game(st.session_state.exp)
+try:    
+    df = load_game(st.session_state.exp)
+except:
+    try:
+        df = load_game(st.session_state.exp, source="csv")
+    except FileNotFoundError as e:
+        st.sidebar.error(f"Error loading experiment data: {e}")
+        st.stop()
+
 round_ids = sorted(df["round"].unique())
 
 if "round" not in st.session_state or st.session_state.round not in round_ids:
@@ -145,15 +153,19 @@ model_name = args_dict.get("model_name", args_dict.get("model", ""))
 with st.sidebar.expander("Price estimate (USD)", expanded=False):
     if not results_dict:
         st.markdown("_results.json not found_")
+    elif not model_name:
+        st.markdown("_No model name found in args.json_")
+    elif "prompt_tokens" not in results_dict or "completion_tokens" not in results_dict:
+        st.markdown("_Token data not found in results.json_")
     else:
         price_row = match_price_row(model_name, load_pricing())
         if price_row:
             inp, cache, out, total = estimate_cost(results_dict, price_row)
             st.metric("Estimated total", f"${total}")
             st.markdown(
-                f"- **Non-cached Input:**  {results_dict['prompt_tokens']-results_dict.get('prompt_tokens_details.cached_tokens',0):,}  →  ${inp}\n"
+                f"- **Non-cached Input:**  {results_dict.get('prompt_tokens',0)-results_dict.get('prompt_tokens_details.cached_tokens',0):,}  →  ${inp}\n"
                 f"- **Cached Input:**  {results_dict.get('prompt_tokens_details.cached_tokens',0):,}  →  ${cache}\n"
-                f"- **Output:** {results_dict['completion_tokens']:,}  →  ${out}"
+                f"- **Output:** {results_dict.get('completion_tokens',0):,}  →  ${out}"
             )
             st.caption(f"Model: **{price_row['Model']}**  "
                        f"(rates per 1M — in: {price_row['Input']}, "
