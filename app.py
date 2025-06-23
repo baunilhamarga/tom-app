@@ -78,27 +78,49 @@ TOM_LABELS   = {
 st.set_page_config("ToM-SAR Replay", layout="wide",
                    initial_sidebar_state="expanded")
 
-# ───────────────────── sidebar: refresh + experiment picker ─────────────────
+# ───────────────────── sidebar: refresh + hierarchical picker ──────────────
 st.sidebar.header("Replay controls")
 
 # ❶  Refresh button — rescans disk & clears caches
 if st.sidebar.button("↻ Refresh experiments"):
-    utils.EXPERIMENTS = utils._discover_experiments()   # update mapping
+    utils.EXPERIMENTS = utils._discover_experiments()     # update mapping
     load_game.cache_clear()
     pdf_to_svg.cache_clear()
 
-# ❷  Dropdown populated from (possibly refreshed) mapping
 exp_labels = list(utils.EXPERIMENTS.keys())
 if not exp_labels:
     st.sidebar.error("No experiments found under the data directory!")
     st.stop()
 
-if "exp" not in st.session_state or st.session_state.exp not in exp_labels:
-    st.session_state.exp = exp_labels[0]
+# helper: split "model/exp_name/seedX" → (model, exp_name, seed)
+def split_label(label: str):
+    parts = label.split("/")
+    return parts[0], parts[1], parts[2] if len(parts) > 2 else ("", "", "")
 
+# ── dropdown 1: model ──────────────────────────────────────────────────────
+models = sorted({split_label(lbl)[0] for lbl in exp_labels})
+if "model_sel" not in st.session_state or st.session_state.model_sel not in models:
+    st.session_state.model_sel = models[0]
+model_sel = st.sidebar.selectbox("Model", models, key="model_sel")
+
+# ── dropdown 2: experiment name (depend on chosen model) ───────────────────
+exps_for_model = sorted({split_label(lbl)[1]
+                         for lbl in exp_labels if lbl.startswith(model_sel + "/")})
+if "exp_sel" not in st.session_state or st.session_state.exp_sel not in exps_for_model:
+    st.session_state.exp_sel = exps_for_model[0]
+exp_sel = st.sidebar.selectbox("Experiment", exps_for_model, key="exp_sel")
+
+# ── dropdown 3: seed (depend on model+experiment) ──────────────────────────
+seed_prefix = f"{model_sel}/{exp_sel}/"
+seeds_for_exp = sorted({split_label(lbl)[2]
+                        for lbl in exp_labels if lbl.startswith(seed_prefix)})
+if "seed_sel" not in st.session_state or st.session_state.seed_sel not in seeds_for_exp:
+    st.session_state.seed_sel = seeds_for_exp[0]
+seed_sel = st.sidebar.selectbox("Seed", seeds_for_exp, key="seed_sel")
+
+# ── compose the final label and store in session_state.exp ─────────────────
+st.session_state.exp = f"{model_sel}/{exp_sel}/{seed_sel}"
 exp_dir = utils.EXPERIMENTS[st.session_state.exp]
-st.sidebar.selectbox("Experiment", exp_labels, key="exp",
-                     format_func=lambda x: x)           # show path as-is
 
 # ── read args.json (silently ignore if missing) ───────────────────────────
 args_path = exp_dir / "args.json"
