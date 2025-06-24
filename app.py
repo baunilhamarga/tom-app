@@ -300,6 +300,12 @@ left, right = st.columns([2, 3])
 sel_round   = st.session_state.round
 
 # ── Chat & metrics ─────────────────────────────────────────
+def truth_chip(val: bool | None) -> str:
+    if val is True:
+        return '<span style="color:#3cb44b;font-weight:bold">✅ Yes</span>'
+    if val is False:
+        return '<span style="color:#e6194b;font-weight:bold">❌ No</span>'
+    return '<span style="color:#777">❓ Unknown</span>'
 with left:
     st.markdown(f"### Round {sel_round}")
     this = df[df["round"] == sel_round]
@@ -312,36 +318,55 @@ with left:
 
     for _, row in this.iterrows():
         agent, color = row["agent_id"], AGENT_COLORS.get(row["agent_id"], "#777")
+
+        # ── chat bubble --------------------------------------------------------
         with st.chat_message(agent, avatar="🧑‍🚒"):
             st.markdown(f"<span style='color:{color};font-weight:bold'>{agent}</span>",
                         unsafe_allow_html=True)
-            st.markdown(f"**Action:** {row['action']}")
-            msg = row["comm"]
-            st.markdown(f"**Message:** {msg}" if isinstance(msg, str) and msg.strip()
-                        else "_(no message)_")
+            st.markdown(f"**Action:** {row.get('action', 'missing')}")
+            msg = row.get("comm", "missing")
+            st.markdown(f"**Message:** {msg}" if str(msg).strip() not in ("", "missing")
+                        else "_(missing)_")
 
-        if pd.notna(row.get("new_belief", None)):
+        # ── belief state -------------------------------------------------------
+        if pd.notna(row.get("new_belief")):
             with st.expander(f"{agent} belief state"):
                 st.write(row["new_belief"])
 
-        def truth_chip(val: bool | None) -> str:
-            if val is True:
-                return '<span style="color:#3cb44b;font-weight:bold">✅ Yes</span>'
-            if val is False:
-                return '<span style="color:#e6194b;font-weight:bold">❌ No</span>'
-            return '<span style="color:#777">❓ Unknown</span>'
+        # ── combined ToM -------------------------------------------------------
+        has_any_tom = any(pd.notna(row.get(lvl)) for lvl in ("ToM1st", "ToM2nd", "ToM3rd"))
+        if has_any_tom:
+            with st.expander(f"{agent} ToM"):
+                for lvl in ("ToM1st", "ToM2nd", "ToM3rd"):
+                    ans = row.get(lvl)
+                    if pd.isna(ans):
+                        continue
+                    q   = row.get(f"{lvl}_q", "(question not recorded)")
+                    gt  = row.get("ground_truth")
+                    lab = TOM_LABELS[lvl]
 
-        for lvl in ("ToM1st", "ToM2nd", "ToM3rd"):
-            ans = row.get(lvl)
-            if pd.notna(ans):                                # only show if answer exists
-                q   = row.get(f"{lvl}_q", "(question not recorded)")
-                gt  = row.get("ground_truth", None)          # same for all three levels
-                lab = TOM_LABELS[lvl]                       # pretty label defined earlier
+                    st.markdown(f"**{lab}**")
+                    st.markdown(f"&nbsp;&nbsp;**Q:** {q}")
+                    st.markdown(f"&nbsp;&nbsp;**A:** {ans}")
+                    st.markdown(f"&nbsp;&nbsp;**Ground Truth:** {truth_chip(gt)}",
+                                unsafe_allow_html=True)
+                    st.markdown("---")
 
-                with st.expander(f"{agent} {lab}"):
-                    st.markdown(f"**Q:** {q}")
-                    st.markdown(f"**A:** {ans}")
-                    st.markdown(f"**Ground Truth:** {truth_chip(gt)}", unsafe_allow_html=True)
+        # ── catch-all expander for anything not yet displayed -----------------
+        shown_keys = {
+            "round", "agent_id", "action", "comm", "new_belief",
+            "ToM1st", "ToM2nd", "ToM3rd",
+            "ToM1st_q", "ToM2nd_q", "ToM3rd_q",
+            "ground_truth"
+        }
+        extras = {k: v for k, v in row.items()
+                if k not in shown_keys and pd.notna(v) and str(v).strip() != ""}
+
+        if extras:
+            with st.expander(f"{agent} other info"):
+                for k, v in extras.items():
+                    st.markdown(f"**{k}**: {v}")
+
 
 
 # ── Vector map ─────────────────────────────────────────────
