@@ -1,24 +1,72 @@
 [
-  { "Model": "gpt-4.1",                     "Input": 2.00,   "Cached input": 0.50,   "Output": 8.00 },
-  { "Model": "gpt-4.1-mini",                "Input": 0.40,   "Cached input": 0.10,   "Output": 1.60 },
-  { "Model": "gpt-4.1-nano",                "Input": 0.10,   "Cached input": 0.025,  "Output": 0.40 },
-  { "Model": "gpt-4.5-preview",             "Input": 75.00,  "Cached input": 37.50,  "Output": 150.00 },
-  { "Model": "gpt-4o",                      "Input": 2.50,   "Cached input": 1.25,   "Output": 10.00 },
-  { "Model": "gpt-4o-audio-preview",        "Input": 2.50,   "Cached input": null,   "Output": 10.00 },
-  { "Model": "gpt-4o-realtime-preview",     "Input": 5.00,   "Cached input": 2.50,   "Output": 20.00 },
-  { "Model": "gpt-4o-mini",                 "Input": 0.15,   "Cached input": 0.075,  "Output": 0.60 },
-  { "Model": "gpt-4o-mini-audio-preview",   "Input": 0.15,   "Cached input": null,   "Output": 0.60 },
-  { "Model": "gpt-4o-mini-realtime-preview","Input": 0.60,   "Cached input": 0.30,   "Output": 2.40 },
-  { "Model": "o1",                          "Input": 15.00,  "Cached input": 7.50,   "Output": 60.00 },
-  { "Model": "o1-pro",                      "Input": 150.00, "Cached input": null,   "Output": 600.00 },
-  { "Model": "o3-pro",                      "Input": 20.00,  "Cached input": null,   "Output": 80.00 },
-  { "Model": "o3",                          "Input": 2.00,   "Cached input": 0.50,   "Output": 8.00 },
-  { "Model": "o4-mini",                     "Input": 1.10,   "Cached input": 0.275,  "Output": 4.40 },
-  { "Model": "o3-mini",                     "Input": 1.10,   "Cached input": 0.55,   "Output": 4.40 },
-  { "Model": "o1-mini",                     "Input": 1.10,   "Cached input": 0.55,   "Output": 4.40 },
+  { "Model": "gpt-4.1-2025-04-14",            "Input": 2.00,   "Cached input": 0.50,   "Output": 8.00 },
+
+  { "Model": "gpt-4.1-mini-2025-04-14",       "Input": 0.40,   "Cached input": 0.10,   "Output": 1.60 },
+
+  { "Model": "gpt-4.1-nano-2025-04-14",       "Input": 0.10,   "Cached input": 0.025,  "Output": 0.40 },
+
+  { "Model": "gpt-4.5-preview-2025-02-27",    "Input": 75.00,  "Cached input": 37.50,  "Output": 150.00 },
+
+  { "Model": "gpt-4o-2024-08-06",             "Input": 2.50,   "Cached input": 1.25,   "Output": 10.00 },
+  { "Model": "gpt-4o-2024-11-20",             "Input": 2.50,   "Cached input": 1.25,   "Output": 10.00 },
+  { "Model": "gpt-4o-2024-05-13",             "Input": 5.00,   "Cached input": null,   "Output": 15.00 },
+
+  { "Model": "gpt-4o-audio-preview-2024-12-17",             "Input": 2.50,   "Cached input": null,  "Output": 10.00 },
+  { "Model": "gpt-4o-audio-preview-2025-06-03",             "Input": 2.50,   "Cached input": null,  "Output": 10.00 },
+  { "Model": "gpt-4o-audio-preview-2024-10-01",             "Input": 2.50,   "Cached input": null,  "Output": 10.00 },
+
+  { "Model": "gpt-4o-realtime-preview-2024-12-17",          "Input": 5.00,   "Cached input": 2.50,  "Output": 20.00 },
+  { "Model": "gpt-4o-realtime-preview-2025-06-03",          "Input": 5.00,   "Cached input": 2.50,  "Output": 20.00 },
+  { "Model": "gpt-4o-realtime-preview-2024-10-01",          "Input": 5.00,   "Cached input": 2.50,  "Output": 20.00 },
+
+  { "Model": "gpt-4o-mini-2024-07-18",                      "Input": 0.15,   "Cached input": 0.075, "Output": 0.60 },
+
+  { "Model": "gpt-4o-mini-audio-preview-2024-12-17",        "Input": 0.15,   "Cached input": null,  "Output": 0.60 },
+
+  { "Model": "gpt-4o-mini-realtime-preview-2024-12-17",     "Input": 0.60,   "Cached input": 0.30,  "Output": 2.40 },
+
+  { "Model": "o1-2024-12-17",               "Input": 15.00,  "Cached input": 7.50,   "Output": 60.00 },
+  { "Model": "o1-preview-2024-09-12",       "Input": 15.00,  "Cached input": 7.50,   "Output": 60.00 },
+
+  { "Model": "o1-pro-2025-03-19",           "Input": 150.00, "Cached input": null,   "Output": 600.00 },
+
+  { "Model": "o3-pro-2025-06-10",           "Input": 20.00,  "Cached input": null,   "Output": 80.00 },
+
+  { "Model": "o3-2025-04-16",               "Input": 2.00,   "Cached input": 0.50,   "Output": 8.00 },
+
+  { "Model": "o4-mini-2025-04-16",          "Input": 1.10,   "Cached input": 0.275,  "Output": 4.40 },
+
+  { "Model": "o3-mini-2025-01-31",          "Input": 1.10,   "Cached input": 0.55,   "Output": 4.40 },
+
+  { "Model": "o1-mini-2024-09-12",          "Input": 1.10,   "Cached input": 0.55,   "Output": 4.40 },
+
   { "Model": "codex-mini-latest",           "Input": 1.50,   "Cached input": 0.375,  "Output": 6.00 },
-  { "Model": "gpt-4o-mini-search-preview",  "Input": 0.15,   "Cached input": null,   "Output": 0.60 },
-  { "Model": "gpt-4o-search-preview",       "Input": 2.50,   "Cached input": null,   "Output": 10.00 },
-  { "Model": "computer-use-preview",        "Input": 3.00,   "Cached input": null,   "Output": 12.00 },
-  { "Model": "gpt-image-1",                 "Input": 5.00,   "Cached input": 1.25,   "Output": null }
+
+  { "Model": "gpt-4o-mini-search-preview-2025-03-11", "Input": 0.15, "Cached input": null, "Output": 0.60 },
+
+  { "Model": "gpt-4o-search-preview-2025-03-11", "Input": 2.50, "Cached input": null, "Output": 10.00 },
+
+  { "Model": "computer-use-preview-2025-03-11", "Input": 3.00, "Cached input": null, "Output": 12.00 },
+
+  { "Model": "gpt-image-1",                 "Input": 5.00,   "Cached input": 1.25,   "Output": null },
+
+  { "Model": "chatgpt-4o-latest",           "Input": 5.00,   "Cached input": null,   "Output": 15.00 },
+
+  { "Model": "gpt-4-turbo-2024-04-09",      "Input": 10.00,  "Cached input": null,   "Output": 30.00 },
+  { "Model": "gpt-4-0125-preview",          "Input": 10.00,  "Cached input": null,   "Output": 30.00 },
+  { "Model": "gpt-4-1106-preview",          "Input": 10.00,  "Cached input": null,   "Output": 30.00 },
+  { "Model": "gpt-4-1106-vision-preview",   "Input": 10.00,  "Cached input": null,   "Output": 30.00 },
+
+  { "Model": "gpt-4-0613",                  "Input": 30.00,  "Cached input": null,   "Output": 60.00 },
+  { "Model": "gpt-4-0314",                  "Input": 30.00,  "Cached input": null,   "Output": 60.00 },
+
+  { "Model": "gpt-4-32k",                   "Input": 60.00,  "Cached input": null,   "Output": 120.00 },
+
+  { "Model": "gpt-3.5-turbo-0125",          "Input": 0.50,   "Cached input": null,   "Output": 1.50 },
+  { "Model": "gpt-3.5-turbo-1106",          "Input": 1.00,   "Cached input": null,   "Output": 2.00 },
+  { "Model": "gpt-3.5-turbo-0613",          "Input": 1.50,   "Cached input": null,   "Output": 2.00 },
+  { "Model": "gpt-3.5-0301",                "Input": 1.50,   "Cached input": null,   "Output": 2.00 },
+
+  { "Model": "gpt-3.5-turbo-instruct",      "Input": 1.50,   "Cached input": null,   "Output": 2.00 },
+  { "Model": "gpt-3.5-turbo-16k-0613",      "Input": 3.00,   "Cached input": null,   "Output": 4.00 }
 ]

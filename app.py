@@ -5,6 +5,7 @@ Run with:  streamlit run app.py
 
 import time, re, streamlit as st, pandas as pd
 from pathlib import Path
+from typing import Dict, List, Tuple, Any, Optional
 import utils                         # we’ll mutate utils.EXPERIMENTS
 from utils import load_game, pdf_to_svg, expand_svg
 import json
@@ -18,44 +19,104 @@ def load_pricing() -> list[dict]:
 import re
 from typing import Optional, Dict, List
 
-def match_price_row(model_name: str, table: List[Dict]) -> Optional[Dict]:
+def match_price_row(model_name: str, table: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """
-    Return the *best* pricing entry for a model name.
+    Return the most specific pricing entry for *model_name*.
 
-    Rules
-    -----
-    1. Strip a final YYYY-MM-DD suffix (e.g.  gpt-4.1-nano-2025-04-14  →  gpt-4.1-nano)
-    2. Among all price-table rows whose Model string is **contained** in the
-       stripped name, pick the *longest* row['Model']  (i.e. most specific).
-    3. If nothing matches, return None.
+    Strategy
+    --------
+    1. Exact match on the full name (case-insensitive).               eg. gpt-4o-mini-2025-05-30
+    2. Strip a trailing -YYYY-MM-DD and try an exact match.           eg. gpt-4o-mini
+    3. If still nothing, among all rows whose ``row['Model']`` is
+       **contained** in the stripped name, pick the *longest* one.
+    4. If nothing matches at all, return ``None``.
     """
-    # 1) normalise and strip datestamp
-    m = model_name.lower()
-    m = re.sub(r"-\d{4}-\d{2}-\d{2}$", "", m)           # remove -YYYY-MM-DD
+    m_full = model_name.lower()
+    m_base = re.sub(r"-\d{4}-\d{2}-\d{2}$", "", m_full)   # remove datestamp
 
+    # 1) exact match on full name (keeps date-specific pricing)
+    for row in table:
+        if row["Model"].lower() == m_full:
+            return row
+
+    # 2) exact match on base name (common pricing)
+    for row in table:
+        if row["Model"].lower() == m_base:
+            return row
+
+    # 3) longest contained substring
     best_row = None
     best_len = -1
-
     for row in table:
         cand = row["Model"].lower()
-        if cand in m:
-            if len(cand) > best_len:                   # 2) most specific
-                best_len = len(cand)
-                best_row = row
+        if cand in m_base and len(cand) > best_len:
+            best_len = len(cand)
+            best_row = row
 
     return best_row
 
-def estimate_cost(results: dict, price: dict) -> tuple[float, float, float, float]:
-    """Return (input$, cached$, output$, total$)."""
-    in_tokens   = results.get("prompt_tokens",0) - results.get("prompt_tokens_details.cached_tokens",0)
-    cache_tokens= results.get("prompt_tokens_details.cached_tokens",0)
-    out_tokens  = results.get("completion_tokens",0)
+_SKU_PATTERNS = {
+    "input":  re.compile(r"\binput\b",  re.I),
+    "cached": re.compile(r"\bcached.*input\b|\bcached\b", re.I),
+    "output": re.compile(r"\boutput\b", re.I),
+}
 
-    input_cost  = in_tokens    / 1_000_000 * price["Input"]
-    cached_cost = cache_tokens / 1_000_000 * price["Cached input"]
-    output_cost = out_tokens   / 1_000_000 * price["Output"]
-    total       = input_cost + cached_cost + output_cost
-    return round(input_cost, 4), round(cached_cost, 4), round(output_cost, 4), round(total, 4)
+def _price(row: Dict[str, Any], kind: str, fallback: Optional[float] = None) -> float:
+    """
+    Return the *kind* price ('input' | 'cached' | 'output') from *row*.
+
+    Skips cells that are None, empty, or not convertible to float.
+    Falls back to *fallback* if nothing usable is found.
+    """
+    pattern = _SKU_PATTERNS[kind]
+
+    for k, v in row.items():
+        if not pattern.search(k):      # wrong column
+            continue
+
+        # ── try to coerce to float ────────────────────────────
+        try:
+            if v is None or (isinstance(v, str) and not v.strip()):
+                continue               # empty cell → keep searching
+            return float(v)
+        except (TypeError, ValueError):
+            # e.g. "—", "n/a", "$2.50" … strip non-numeric chars and retry
+            try:
+                num = float(re.sub(r"[^\d.+-eE]", "", str(v)))
+                return num
+            except ValueError:
+                continue               # still not numeric → keep searching
+
+    # ── fallback or error ─────────────────────────────────────
+    if fallback is not None:
+        return fallback
+    raise KeyError(f"No usable ‘{kind}’ column in pricing row: {row}")
+
+
+def estimate_cost(results: Dict[str, Any], price_row: Dict[str, Any]
+                  ) -> Tuple[float, float, float, float]:
+    """Return (input $, cached $, output $, total $) given *results* and *price_row*."""
+    # ── token counts ─────────────────────────────────────────────────────
+    in_tokens    = results.get("prompt_tokens", 0) \
+                 - results.get("prompt_tokens_details.cached_tokens", 0)
+    cache_tokens = results.get("prompt_tokens_details.cached_tokens", 0)
+    out_tokens   = results.get("completion_tokens", 0)
+
+    # ── $/1M rates ───────────────────────────────────────────────────────
+    in_rate     = _price(price_row, "input")
+    cache_rate  = _price(price_row, "cached", fallback=in_rate)
+    out_rate    = _price(price_row, "output")
+
+    # ── cost (USD) ───────────────────────────────────────────────────────
+    input_cost   = in_tokens    / 1_000_000 * in_rate
+    cached_cost  = cache_tokens / 1_000_000 * cache_rate
+    output_cost  = out_tokens   / 1_000_000 * out_rate
+    total        = input_cost + cached_cost + output_cost
+
+    return (round(input_cost, 4),
+            round(cached_cost, 4),
+            round(output_cost, 4),
+            round(total, 4))
 
 
 # ── apply scheduled round change (comes from previous run) ────────────────
@@ -202,6 +263,7 @@ with st.sidebar.expander("Final Results", expanded=False):
 
 # ─────────────────────────── cost estimate panel ─────────────────────────
 model_name = args_dict.get("model_name", args_dict.get("model", ""))
+
 with st.sidebar.expander("Price estimate (USD)", expanded=False):
     if not results_dict:
         st.markdown("_results.json not found_")
@@ -214,16 +276,24 @@ with st.sidebar.expander("Price estimate (USD)", expanded=False):
         if price_row:
             inp, cache, out, total = estimate_cost(results_dict, price_row)
             st.metric("Estimated total", f"${total}")
+
             st.markdown(
                 f"- **Non-cached Input:**  {results_dict.get('prompt_tokens',0)-results_dict.get('prompt_tokens_details.cached_tokens',0):,}  →  ${inp}\n"
-                f"- **Cached Input:**  {results_dict.get('prompt_tokens_details.cached_tokens',0):,}  →  ${cache}\n"
-                f"- **Output:** {results_dict.get('completion_tokens',0):,}  →  ${out}"
+                f"- **Cached Input:**      {results_dict.get('prompt_tokens_details.cached_tokens',0):,}                       →  ${cache}\n"
+                f"- **Output:**            {results_dict.get('completion_tokens',0):,}                                       →  ${out}"
             )
-            st.caption(f"Model: **{price_row['Model']}**  "
-                       f"(rates per 1M — in: {price_row['Input']}, "
-                       f"cached: {price_row['Cached input']}, out: {price_row['Output']})")
+
+            # pull the actual rates via the same helper for consistency
+            in_rate    = _price(price_row, "input")
+            cached_rate= _price(price_row, "cached", fallback=in_rate)
+            out_rate   = _price(price_row, "output")
+
+            st.caption(
+                f"Model: **{price_row['Model']}**  "
+                f"(rates per 1 M — in: {in_rate}, cached: {cached_rate}, out: {out_rate})"
+            )
         else:
-            st.markdown("_Model not found in pricing table_")
+            st.markdown(f"_Model {model_name} not found in pricing table_")
 
 # ───────────────────────── main layout ─────────────────────
 left, right = st.columns([2, 3])
