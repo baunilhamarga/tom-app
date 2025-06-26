@@ -80,7 +80,7 @@ def load_game(
 @lru_cache(maxsize=None)
 def load_requests_by_round(label: str) -> dict[tuple[str, int], list[dict]]:
     """
-    Returns {(agent, round_idx) : [request_dict, …]}   round_idx starts at 0
+    Returns {(agent, round_idx) : [request_dict, …]}   round_idx starts at 1
     Splits rounds using the rule:
       • The agent that appears first in a round (= `leader`)
       • Once a *different* agent appears, leader’s turn is over
@@ -91,7 +91,7 @@ def load_requests_by_round(label: str) -> dict[tuple[str, int], list[dict]]:
         return {}
 
     table   = defaultdict(list)
-    round_i = 0
+    round_i = 1
     leader  = None
     seen_other = False
 
