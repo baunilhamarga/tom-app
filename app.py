@@ -342,14 +342,14 @@ with left:
                     if pd.isna(ans):
                         continue
                     q   = row.get(f"{lvl}_q", "(question not recorded)")
-                    gt  = row.get("ground_truth")
+                    #gt  = row.get("ground_truth")
                     lab = TOM_LABELS[lvl]
 
                     st.markdown(f"**{lab}**")
                     st.markdown(f"&nbsp;&nbsp;**Q:** {q}")
                     st.markdown(f"&nbsp;&nbsp;**A:** {ans}")
-                    st.markdown(f"&nbsp;&nbsp;**Ground Truth:** {truth_chip(gt)}",
-                                unsafe_allow_html=True)
+                    #st.markdown(f"&nbsp;&nbsp;**Ground Truth:** {truth_chip(gt)}",
+                    #            unsafe_allow_html=True)
                     st.markdown("---")
 
         # ── catch-all expander for anything not yet displayed -----------------
