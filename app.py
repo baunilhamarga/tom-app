@@ -260,6 +260,20 @@ with st.sidebar.expander("Final Results", expanded=False):
             st.markdown(f"**{k}**: {v}")
     else:
         st.markdown("_results.json not found_")
+        
+# ─────────── Requests log in sidebar ────────────────────────────────────
+log_path = exp_dir / "chat_log.jsonl"
+if log_path.exists():
+    with st.sidebar.expander("Requests details", expanded=False):
+        with open(log_path, "r", encoding="utf-8") as f:
+            for idx, line in enumerate(f, 1):
+                rec = json.loads(line)
+                st.markdown(f"### Request {idx}")
+                for msg in rec.get("prompt", []):
+                    st.markdown(f"- **{msg['role']}**: {msg['content']}")
+                st.markdown(f"- **{rec.get('agent', 'LLM agent')}**: {rec.get('response', '')}")
+                st.markdown("<hr/>", unsafe_allow_html=True)
+
 
 # ─────────────────────────── cost estimate panel ─────────────────────────
 model_name = args_dict.get("model_name", args_dict.get("model", ""))
