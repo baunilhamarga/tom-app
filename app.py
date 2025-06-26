@@ -269,8 +269,11 @@ if log_path.exists():
             for idx, line in enumerate(f, 1):
                 rec = json.loads(line)
                 st.markdown(f"### Request {idx}")
+                st.markdown(f" #### Agent: {rec.get('agent', 'LLM agent')}")
+                st.markdown(f" #### Prompt:")
                 for msg in rec.get("prompt", []):
                     st.markdown(f"- **{msg['role']}**: {msg['content']}")
+                st.markdown(f" #### Response:")
                 st.markdown(f"- **{rec.get('agent', 'LLM agent')}**: {rec.get('response', '')}")
                 st.markdown("<hr/>", unsafe_allow_html=True)
 
