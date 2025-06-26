@@ -233,6 +233,12 @@ except:
         st.sidebar.error(f"Error loading experiment data: {e}")
         st.stop()
 
+try:
+    requests_by_round = utils.load_requests_by_round(st.session_state.exp)
+except:
+    st.sidebar.error("Error loading requests by round data.")
+    requests_by_round = {}
+
 round_ids = sorted(df["round"].unique())
 
 if "round" not in st.session_state or st.session_state.round not in round_ids:
@@ -260,23 +266,6 @@ with st.sidebar.expander("Final Results", expanded=False):
             st.markdown(f"**{k}**: {v}")
     else:
         st.markdown("_results.json not found_")
-        
-# ─────────── Requests log in sidebar ────────────────────────────────────
-log_path = exp_dir / "chat_log.jsonl"
-if log_path.exists():
-    with st.sidebar.expander("Requests details", expanded=False):
-        with open(log_path, "r", encoding="utf-8") as f:
-            for idx, line in enumerate(f, 1):
-                rec = json.loads(line)
-                st.markdown(f"### Request {idx}")
-                st.markdown(f" #### Agent: {rec.get('agent', 'LLM agent')}")
-                st.markdown(f" #### Prompt:")
-                for msg in rec.get("prompt", []):
-                    st.markdown(f"- **{msg['role']}**: {msg['content']}")
-                st.markdown(f" #### Response:")
-                st.markdown(f"- **{rec.get('agent', 'LLM agent')}**: {rec.get('response', '')}")
-                st.markdown("<hr/>", unsafe_allow_html=True)
-
 
 # ─────────────────────────── cost estimate panel ─────────────────────────
 model_name = args_dict.get("model_name", args_dict.get("model", ""))
@@ -384,6 +373,18 @@ with left:
                 for k, v in extras.items():
                     st.markdown(f"**{k}**: {v}")
 
+        # ───── requests expander (per agent, this round) ────────────────────
+        reqs = requests_by_round.get((agent, sel_round), [])
+        if reqs:
+            with st.expander(f"{agent} requests ({len(reqs)})"):
+                for idx, rec in enumerate(reqs, 1):
+                    st.markdown(f"**{agent}'s request {idx}**")
+                    st.markdown(f"**Prompt**")
+                    for m in rec.get("prompt", []):
+                        st.markdown(f"- **{m.get('role', '')}**: {m.get('content', '')}")
+                    st.markdown(f"**Response**")
+                    st.markdown(f"- **{rec.get('agent', 'LLM agent')}**: {rec.get('response', '')}")
+                    st.markdown("<hr/>", unsafe_allow_html=True)
 
 
 # ── Vector map ─────────────────────────────────────────────

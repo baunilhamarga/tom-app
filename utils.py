@@ -9,6 +9,7 @@ import json, pandas as pd
 import cairosvg                # fallback if pdf2svg CLI is absent
 # convert_from_path is still imported for backward compatibility (PNG helper)
 from pdf2image import convert_from_path
+from collections import defaultdict
 
 
 # ──────────────────────────────────────────── global paths & experiment map ──
@@ -76,6 +77,45 @@ def load_game(
     df = df.sort_values(["round", "agent_id"]).reset_index(drop=True)
     return df
 
+@lru_cache(maxsize=None)
+def load_requests_by_round(label: str) -> dict[tuple[str, int], list[dict]]:
+    """
+    Returns {(agent, round_idx) : [request_dict, …]}   round_idx starts at 0
+    Splits rounds using the rule:
+      • The agent that appears first in a round (= `leader`)
+      • Once a *different* agent appears, leader’s turn is over
+      • Next time leader appears ⇒ new round
+    """
+    path = EXPERIMENTS[label] / "chat_log.jsonl"
+    if not path.exists():
+        return {}
+
+    table   = defaultdict(list)
+    round_i = 0
+    leader  = None
+    seen_other = False
+
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            rec    = json.loads(line)
+            agent  = rec.get("agent", "unknown")
+
+            # initialise first round
+            if leader is None:
+                leader = agent
+
+            # new round condition
+            elif agent == leader and seen_other:
+                round_i += 1
+                leader = agent
+                seen_other = False
+
+            elif agent != leader:
+                seen_other = True
+
+            table[(agent, round_i)].append(rec)
+
+    return table
 
 # ───────────────────────────────────────────────────── PDF ▶ PNG (optional) ─
 @lru_cache(maxsize=None)
