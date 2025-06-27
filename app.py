@@ -7,7 +7,7 @@ import time, re, streamlit as st, pandas as pd
 from pathlib import Path
 from typing import Dict, List, Tuple, Any, Optional
 import utils                         # we’ll mutate utils.EXPERIMENTS
-from utils import load_game, pdf_to_svg, expand_svg
+from utils import load_game, pdf_to_svg, expand_svg, load_requests_by_round
 import json
 PRICING_PATH = Path(__file__).parent / "assets/pricing.json"
 
@@ -147,6 +147,7 @@ if st.sidebar.button("↻ Refresh experiments"):
     utils.EXPERIMENTS = utils._discover_experiments()
     load_game.cache_clear()
     pdf_to_svg.cache_clear()
+    load_requests_by_round.cache_clear()
 
 exp_labels = list(utils.EXPERIMENTS.keys())
 if not exp_labels:
@@ -234,7 +235,7 @@ except:
         st.stop()
 
 try:
-    requests_by_round = utils.load_requests_by_round(st.session_state.exp)
+    requests_by_round = load_requests_by_round(st.session_state.exp)
 except:
     st.sidebar.error("Error loading requests by round data.")
     requests_by_round = {}
@@ -375,16 +376,15 @@ with left:
 
         # ───── requests expander (per agent, this round) ────────────────────
         reqs = requests_by_round.get((agent, sel_round), [])
-        if reqs:
-            with st.expander(f"{agent} requests ({len(reqs)})"):
-                for idx, rec in enumerate(reqs, 1):
-                    st.markdown(f"**{agent}'s request {idx}**")
-                    st.markdown(f"**Prompt**")
-                    for m in rec.get("prompt", []):
-                        st.markdown(f"- **{m.get('role', '')}**: {m.get('content', '')}")
-                    st.markdown(f"**Response**")
-                    st.markdown(f"- **{rec.get('agent', 'LLM agent')}**: {rec.get('response', '')}")
-                    st.markdown("<hr/>", unsafe_allow_html=True)
+        with st.expander(f"{agent} requests ({len(reqs)})"):
+            for idx, rec in enumerate(reqs, 1):
+                st.markdown(f"**{agent}'s request {idx}**")
+                st.markdown(f"**Prompt**")
+                for m in rec.get("prompt", []):
+                    st.markdown(f"- **{m.get('role', '')}**: {m.get('content', '')}")
+                st.markdown(f"**Response**")
+                st.markdown(f"- **{rec.get('agent', 'LLM agent')}**: {rec.get('response', '')}")
+                st.markdown("<hr/>", unsafe_allow_html=True)
 
 
 # ── Vector map ─────────────────────────────────────────────
