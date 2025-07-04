@@ -245,10 +245,22 @@ round_ids = sorted(df["round"].unique())
 if "round" not in st.session_state or st.session_state.round not in round_ids:
     st.session_state.round = round_ids[0]
 
-st.sidebar.slider("Round", min_value=round_ids[0], max_value=round_ids[-1],
-                  key="round", format="%d")
-st.sidebar.checkbox("Auto-play", key="auto")
-speed = st.sidebar.slider("Speed (sec / round)", 0.3, 3.0, 1.0, 0.1)
+# ── round selector ───────────────────────────────────────────────────
+if len(round_ids) == 1:
+    # single-round run → no slider needed
+    st.sidebar.markdown(f"**Round:** {round_ids[0]}")
+else:
+    st.sidebar.slider(
+        "Round",
+        min_value=round_ids[0],
+        max_value=round_ids[-1],
+        value=st.session_state.round,   # explicit value avoids API error
+        step=1,
+        key="round",
+        format="%d",
+    )
+    st.sidebar.checkbox("Auto-play", key="auto")
+    speed = st.sidebar.slider("Speed (sec / round)", 0.3, 3.0, 1.0, 0.1)
 
 with st.sidebar.expander("Experiment args", expanded=False):
     if args_dict:

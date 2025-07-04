@@ -80,40 +80,53 @@ def load_game(
 @lru_cache(maxsize=None)
 def load_requests_by_round(label: str) -> dict[tuple[str, int], list[dict]]:
     """
-    Returns {(agent, round_idx) : [request_dict, …]}   round_idx starts at 1
-    Splits rounds using the rule:
-      • The agent that appears first in a round (= `leader`)
-      • Once a *different* agent appears, leader’s turn is over
-      • Next time leader appears ⇒ new round
+    {(agent, round_id) : [request, …]}
+
+    • If a log entry has a key `"round"`, that number is used directly.
+    • Otherwise we fall back to the old heuristic:
+        - first agent to appear in a round is the leader
+        - when a different agent appears, leader’s turn ends
+        - next time the leader appears ⇒ new round
+    Round counting starts at 1.
     """
     path = EXPERIMENTS[label] / "chat_log.jsonl"
     if not path.exists():
         return {}
 
-    table   = defaultdict(list)
-    round_i = 1
-    leader  = None
+    table      = defaultdict(list)
+    round_i    = 1          # heuristic counter
+    leader     = None
     seen_other = False
 
     with open(path, "r", encoding="utf-8") as f:
         for line in f:
-            rec    = json.loads(line)
-            agent  = rec.get("agent", "unknown")
+            rec   = json.loads(line)
+            agent = rec.get("agent", "unknown")
 
-            # initialise first round
-            if leader is None:
-                leader = agent
-
-            # new round condition
-            elif agent == leader and seen_other:
-                round_i += 1
-                leader = agent
+            # ── use explicit round if present ───────────────────────────
+            if "round" in rec:
+                try:
+                    round_num = int(rec["round"])
+                except (TypeError, ValueError):
+                    round_num = round_i           # fallback if malformed
+                # synchronise heuristic tracker with explicit value
+                round_i    = round_num
+                leader     = agent
                 seen_other = False
+                
 
-            elif agent != leader:
-                seen_other = True
+            # ── otherwise apply leader/turn heuristic ───────────────────
+            else:
+                if leader is None:
+                    leader = agent
+                elif agent == leader and seen_other:
+                    round_i += 1
+                    leader, seen_other = agent, False
+                elif agent != leader:
+                    seen_other = True
+                round_num = round_i
 
-            table[(agent, round_i)].append(rec)
+            table[(agent, round_num)].append(rec)
 
     return table
 
