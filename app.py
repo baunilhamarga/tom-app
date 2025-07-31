@@ -224,41 +224,87 @@ if results_path.exists():
     with open(results_path, "r", encoding="utf-8") as f:
         results_dict = json.load(f)
 
-# ───────────────────── sidebar: round slider & autoplay ─────────────────────
-try:    
+# ───────────────────── sidebar: round slider & autoplay ──────────────────
+# load DataFrame ----------------------------------------------------------------
+try:
     df = load_game(st.session_state.exp)
-except:
+except Exception:
     try:
         df = load_game(st.session_state.exp, source="csv")
     except FileNotFoundError as e:
         st.sidebar.error(f"Error loading experiment data: {e}")
         st.stop()
 
+# load requests-by-round (safe fallback) ----------------------------------------
 try:
     requests_by_round = load_requests_by_round(st.session_state.exp)
-except:
+except Exception:
     st.sidebar.error("Error loading requests by round data.")
     requests_by_round = {}
 
 round_ids = sorted(df["round"].unique())
-
 if "round" not in st.session_state or st.session_state.round not in round_ids:
     st.session_state.round = round_ids[0]
 
-# ── round selector ───────────────────────────────────────────────────
+# ───────── round selector (multi-control, no post-write) ──────────
 if len(round_ids) == 1:
-    # single-round run → no slider needed
     st.sidebar.markdown(f"**Round:** {round_ids[0]}")
 else:
-    st.sidebar.slider(
+    # canonical value we’ll update below
+    cur_round = st.session_state.round
+
+    # slider --------------------------------------------------------
+    slider_val = st.sidebar.slider(
         "Round",
         min_value=round_ids[0],
         max_value=round_ids[-1],
-        value=st.session_state.round,   # explicit value avoids API error
+        value=cur_round,
+        key="round_slider",
         step=1,
-        key="round",
         format="%d",
     )
+
+    # prev | number | next -----------------------------------------
+    prev_col, num_col, next_col = st.sidebar.columns([1, 2, 1])
+
+    with prev_col:
+        prev_clicked = st.button("◀", key="prev_round")
+
+    with next_col:
+        next_clicked = st.button("▶", key="next_round")
+
+    with num_col:
+        num_val = st.number_input(
+            label=" ",
+            min_value=round_ids[0],
+            max_value=round_ids[-1],
+            value=cur_round,
+            step=1,
+            key="round_input",
+        )
+
+    # ---------- decide the new round ------------------------------
+    new_round = cur_round
+    if prev_clicked:
+        new_round = max(round_ids[0], cur_round - 1)
+    elif next_clicked:
+        new_round = min(round_ids[-1], cur_round + 1)
+    elif num_val != cur_round:
+        new_round = int(num_val)          # typed value
+    elif slider_val != cur_round:
+        new_round = int(slider_val)       # dragged slider
+
+    # if something changed: update & rerun so widgets re-sync
+    if new_round != cur_round:
+        st.session_state.round = new_round
+        # 1.35+ → st.rerun(); older versions → st.experimental_rerun()
+        if hasattr(st, "rerun"):
+            st.rerun()
+        else:
+            st.experimental_rerun()
+
+
+    # autoplay ------------------------------------------------------
     st.sidebar.checkbox("Auto-play", key="auto")
     speed = st.sidebar.slider("Speed (sec / round)", 0.3, 3.0, 1.0, 0.1)
 
