@@ -170,6 +170,20 @@ def pdf_to_svg(label: str, round_id: int) -> Path:
 
     return svg_path
 
+def pdf_to_svg_file(pdf_path: Path) -> Path:
+    """
+    Convert <something>.pdf → <something>.svg (once) and return the SVG Path.
+    """
+    svg_path = pdf_path.with_suffix(".svg")
+    if svg_path.exists():
+        return svg_path
+
+    if shutil.which("pdf2svg"):
+        subprocess.run(["pdf2svg", str(pdf_path), str(svg_path)], check=True)
+    else:
+        cairosvg.svg_from_pdf(url=str(pdf_path), write_to=str(svg_path))
+    return svg_path
+
 
 # ─────────────────────────────────────────── SVG width patch helper (unchanged)
 def expand_svg(svg_xml: str) -> str:

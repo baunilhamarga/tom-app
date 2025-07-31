@@ -7,7 +7,7 @@ import time, re, streamlit as st, pandas as pd
 from pathlib import Path
 from typing import Dict, List, Tuple, Any, Optional
 import utils                         # we’ll mutate utils.EXPERIMENTS
-from utils import load_game, pdf_to_svg, expand_svg, load_requests_by_round
+from utils import load_game, pdf_to_svg, expand_svg, load_requests_by_round, pdf_to_svg_file
 import json
 PRICING_PATH = Path(__file__).parent / "assets/pricing.json"
 
@@ -446,9 +446,35 @@ with left:
 
 
 # ── Vector map ─────────────────────────────────────────────
+# -------------------------------------------------------------------------
+# Right-hand column: map display (after you compute svg_path, etc.)
+# -------------------------------------------------------------------------
+compressed_pdf = exp_dir / "compressed_graph.pdf"
+
+if compressed_pdf.exists():
+    if "map_variant" not in st.session_state:
+        st.session_state.map_variant = "Original"
+
+    orig_col, comp_col = right.columns(2)
+    with orig_col:
+        if st.button("Original"):
+            st.session_state.map_variant = "Original"
+    with comp_col:
+        if st.button("Compressed"):
+            st.session_state.map_variant = "Compressed"
+else:
+    st.session_state.map_variant = "Original"
+
+# -- display map -----------------------------------------------------------
 with right:
-    svg_xml = expand_svg(Path(pdf_to_svg(st.session_state.exp, sel_round)).read_text())
-    st.image(svg_xml, output_format="svg", use_container_width=True)
+    if st.session_state.map_variant == "Compressed":
+        svg_path = pdf_to_svg_file(compressed_pdf)
+        svg_xml  = expand_svg(Path(svg_path).read_text())
+        st.image(svg_xml, output_format="svg", use_container_width=True)
+    else:
+        svg_xml = expand_svg(Path(pdf_to_svg(st.session_state.exp, sel_round)).read_text())
+        st.image(svg_xml, output_format="svg", use_container_width=True)
+
 
 # ───────────────────────── autoplay scheduler ───────────────────────────
 if st.session_state.get("auto"):
