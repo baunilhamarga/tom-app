@@ -297,11 +297,7 @@ else:
     # if something changed: update & rerun so widgets re-sync
     if new_round != cur_round:
         st.session_state.round = new_round
-        # 1.35+ → st.rerun(); older versions → st.experimental_rerun()
-        if hasattr(st, "rerun"):
-            st.rerun()
-        else:
-            st.experimental_rerun()
+        st.rerun()
 
 
     # autoplay ------------------------------------------------------
@@ -470,10 +466,10 @@ with right:
     if st.session_state.map_variant == "Compressed":
         svg_path = pdf_to_svg_file(compressed_pdf)
         svg_xml  = expand_svg(Path(svg_path).read_text())
-        st.image(svg_xml, output_format="svg", use_container_width=True)
+        st.image(svg_xml, output_format="svg", width="stretch")
     else:
         svg_xml = expand_svg(Path(pdf_to_svg(st.session_state.exp, sel_round)).read_text())
-        st.image(svg_xml, output_format="svg", use_container_width=True)
+        st.image(svg_xml, output_format="svg", width="stretch")
 
 
 # ───────────────────────── autoplay scheduler ───────────────────────────

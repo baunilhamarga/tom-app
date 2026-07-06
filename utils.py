@@ -13,7 +13,7 @@ from collections import defaultdict
 
 
 # ──────────────────────────────────────────── global paths & experiment map ──
-ROOT_DATA = Path("../LLM_MARL/data")
+ROOT_DATA = Path("./data")
 
 def _discover_experiments(root: Path = ROOT_DATA) -> dict[str, Path]:
     """
