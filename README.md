@@ -82,6 +82,11 @@ repository's data folder, for example
 `/usr/users/xai/gama_hei/projects/LLM_MARL/data`. `.env` is ignored by Git and
 is loaded automatically by the dashboard and helper scripts.
 
+The dashboard defaults to the configured full source. Its source control can
+switch the current browser session to the tracked sample data without changing
+other users' sessions. Set `TOM_APP_SAMPLE_ROOT` to override the default
+repository `data/` sample directory.
+
 If Cloud Storage is unavailable, the app falls back to local sample data.
 Create that sample set with:
 

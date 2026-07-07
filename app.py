@@ -4,9 +4,11 @@ Run with:  streamlit run app.py
 """
 
 import time, re, streamlit as st, pandas as pd
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Tuple, Any, Optional
-import utils                         # we’ll mutate utils.EXPERIMENTS
+import utils
+from experiment_store import run_started_at
 from utils import load_game, pdf_to_svg, expand_svg, load_requests_by_round, pdf_to_svg_file
 import json
 PRICING_PATH = Path(__file__).parent / "assets/pricing.json"
@@ -141,16 +143,28 @@ st.set_page_config("ToM-SAR Replay", layout="wide",
 
 # ───────────────── sidebar: refresh + hierarchical picker ────────────────
 st.sidebar.header("Replay controls")
-st.sidebar.caption(f"Data source: {utils.STORE.backend}")
-if utils.STORE.fallback_error:
-    st.sidebar.warning("Cloud data unavailable; using local sample data.")
+
+source_label = st.sidebar.segmented_control(
+    "Experiment source",
+    ["Full data", "Sample data"],
+    default="Full data",
+    key="experiment_source",
+)
+source_mode = "sample" if source_label == "Sample data" else "full"
+source_changed = st.session_state.get("loaded_source_mode") != source_mode
+st.session_state.loaded_source_mode = source_mode
+active_store = utils.get_store(source_mode)
 
 # ↻ Refresh button — rescan disk & clear caches
 if st.sidebar.button("↻ Refresh experiments"):
-    utils.EXPERIMENTS = utils.refresh_experiments()
+    active_store = utils.refresh_store(source_mode)
 
-exp_labels = list(utils.EXPERIMENTS.keys())
-if not exp_labels:
+st.sidebar.caption(f"Data source: {active_store.backend}")
+if active_store.fallback_error:
+    st.sidebar.warning("Cloud data unavailable; using the configured local fallback.")
+
+all_labels = list(active_store.experiments)
+if not all_labels:
     st.sidebar.error("No experiments found under the data directory!")
     st.stop()
 
@@ -162,6 +176,65 @@ def parts(lbl: str):
         return p[0], p[1], p[2], p[3]          # old_n/model/exp/seed
     return "", p[0], p[1], p[2]               # model/exp/seed   (top = "")
 # ------------------------------------------------------------------------
+
+def select_experiment(label: str) -> None:
+    top, model, experiment, seed = parts(label)
+    st.session_state.folder_sel = top or model
+    st.session_state.model_sel = model
+    st.session_state.exp_sel = experiment
+    st.session_state.seed_sel = seed
+
+
+run_dates = {
+    label: run_started_at(active_store.experiments[label])
+    for label in all_labels
+}
+known_dates = [timestamp.date() for timestamp in run_dates.values() if timestamp]
+
+if known_dates:
+    earliest_date, latest_date = min(known_dates), max(known_dates)
+    current_range = st.session_state.get("experiment_dates")
+    valid_range = (
+        isinstance(current_range, (tuple, list))
+        and len(current_range) in (1, 2)
+        and earliest_date <= current_range[0] <= current_range[-1] <= latest_date
+    )
+    if source_changed or not valid_range:
+        st.session_state.experiment_dates = (earliest_date, latest_date)
+
+    selected_dates = st.sidebar.date_input(
+        "Experiment dates",
+        min_value=earliest_date,
+        max_value=latest_date,
+        key="experiment_dates",
+    )
+    if isinstance(selected_dates, (tuple, list)):
+        start_date = selected_dates[0]
+        end_date = selected_dates[-1]
+    else:
+        start_date = end_date = selected_dates
+
+    exp_labels = [
+        label
+        for label in all_labels
+        if run_dates[label]
+        and start_date <= run_dates[label].date() <= end_date
+    ]
+else:
+    exp_labels = all_labels
+    st.sidebar.caption("Experiment dates are unavailable for this source.")
+
+if not exp_labels:
+    st.sidebar.warning("No experiments match this date range.")
+    st.stop()
+
+minimum_time = datetime.min.replace(tzinfo=timezone.utc)
+latest_label = max(
+    exp_labels,
+    key=lambda label: (run_dates[label] or minimum_time, label),
+)
+if source_changed or st.session_state.get("exp") not in exp_labels:
+    select_experiment(latest_label)
 
 # 1️⃣  Top-level folder dropdown (current models + old_n)
 top_folders = sorted({parts(lbl)[0] or parts(lbl)[1] for lbl in exp_labels})
@@ -207,29 +280,29 @@ else:
     full_label = f"{model_sel}/{exp_sel}/{seed_sel}"
 
 st.session_state.exp = full_label
-exp_dir = utils.get_experiment_dir(full_label)
+exp_dir = utils.get_experiment_dir(full_label, active_store)
 
 
 # ── read args.json (silently ignore if missing) ───────────────────────────
-args_dict = utils.load_json_artifact(full_label, "args.json")
+args_dict = utils.load_json_artifact(full_label, "args.json", active_store)
         
 # ── read results.json (silently ignore if missing) ───────────────────────────
-results_dict = utils.load_json_artifact(full_label, "results.json")
+results_dict = utils.load_json_artifact(full_label, "results.json", active_store)
 
 # ───────────────────── sidebar: round slider & autoplay ──────────────────
 # load DataFrame ----------------------------------------------------------------
 try:
-    df = load_game(st.session_state.exp)
+    df = load_game(st.session_state.exp, store=active_store)
 except Exception:
     try:
-        df = load_game(st.session_state.exp, source="csv")
+        df = load_game(st.session_state.exp, source="csv", store=active_store)
     except FileNotFoundError as e:
         st.sidebar.error(f"Error loading experiment data: {e}")
         st.stop()
 
 # load requests-by-round (safe fallback) ----------------------------------------
 try:
-    requests_by_round = load_requests_by_round(st.session_state.exp)
+    requests_by_round = load_requests_by_round(st.session_state.exp, active_store)
 except Exception:
     st.sidebar.error("Error loading requests by round data.")
     requests_by_round = {}
@@ -365,6 +438,24 @@ def truth_chip(val: bool | None) -> str:
         return '<span style="color:#e6194b;font-weight:bold">❌ No</span>'
     return '<span style="color:#777">❓ Unknown</span>'
 with left:
+    if sel_round == round_ids[-1]:
+        mission_outcome = utils.resolve_mission_outcome(
+            results_dict,
+            active_store.get(full_label),
+        )
+        if mission_outcome is None:
+            st.info("Mission outcome unavailable")
+        elif mission_outcome["success"]:
+            st.success("Mission accomplished")
+        else:
+            reason = mission_outcome.get("reason", "Mission objectives were not completed.")
+            st.error(f"Mission failed: {reason}")
+        if mission_outcome and mission_outcome.get("inferred"):
+            st.warning(
+                "Legacy outcome inferred from a fixed maximum score of 90; "
+                "this may be inaccurate for experiments with different objectives."
+            )
+
     st.markdown(f"### Round {sel_round}")
     this = df[df["round"] == sel_round]
 
@@ -443,8 +534,8 @@ with left:
 # Right-hand column: map display (after you compute svg_path, etc.)
 # -------------------------------------------------------------------------
 compressed_pdf = exp_dir / "compressed_graph.pdf"
-if utils.artifact_exists(full_label, "compressed_graph.pdf"):
-    compressed_pdf = utils.STORE.artifact_path(full_label, "compressed_graph.pdf")
+if utils.artifact_exists(full_label, "compressed_graph.pdf", active_store):
+    compressed_pdf = active_store.artifact_path(full_label, "compressed_graph.pdf")
 
 if compressed_pdf.exists():
     if "map_variant" not in st.session_state:
@@ -467,7 +558,9 @@ with right:
         svg_xml  = expand_svg(Path(svg_path).read_text())
         st.image(svg_xml, output_format="svg", width="stretch")
     else:
-        svg_xml = expand_svg(Path(pdf_to_svg(st.session_state.exp, sel_round)).read_text())
+        svg_xml = expand_svg(
+            Path(pdf_to_svg(st.session_state.exp, sel_round, active_store)).read_text()
+        )
         st.image(svg_xml, output_format="svg", width="stretch")
 
 

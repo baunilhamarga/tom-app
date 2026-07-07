@@ -31,6 +31,10 @@ class RoundControlTests(unittest.TestCase):
             }
             app_path = Path(__file__).parents[1] / "app.py"
             with patch.dict(os.environ, env):
+                import utils
+
+                utils.get_store.cache_clear()
+                utils._clear_artifact_caches()
                 app = AppTest.from_file(str(app_path), default_timeout=30).run()
 
                 self.assertFalse(app.exception)
