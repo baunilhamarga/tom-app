@@ -141,13 +141,13 @@ st.set_page_config("ToM-SAR Replay", layout="wide",
 
 # ───────────────── sidebar: refresh + hierarchical picker ────────────────
 st.sidebar.header("Replay controls")
+st.sidebar.caption(f"Data source: {utils.STORE.backend}")
+if utils.STORE.fallback_error:
+    st.sidebar.warning("Cloud data unavailable; using local sample data.")
 
 # ↻ Refresh button — rescan disk & clear caches
 if st.sidebar.button("↻ Refresh experiments"):
-    utils.EXPERIMENTS = utils._discover_experiments()
-    load_game.cache_clear()
-    pdf_to_svg.cache_clear()
-    load_requests_by_round.cache_clear()
+    utils.EXPERIMENTS = utils.refresh_experiments()
 
 exp_labels = list(utils.EXPERIMENTS.keys())
 if not exp_labels:
@@ -207,22 +207,14 @@ else:
     full_label = f"{model_sel}/{exp_sel}/{seed_sel}"
 
 st.session_state.exp = full_label
-exp_dir = utils.EXPERIMENTS[full_label]
+exp_dir = utils.get_experiment_dir(full_label)
 
 
 # ── read args.json (silently ignore if missing) ───────────────────────────
-args_path = exp_dir / "args.json"
-args_dict = {}
-if args_path.exists():
-    with open(args_path, "r", encoding="utf-8") as f:
-        args_dict = json.load(f)
+args_dict = utils.load_json_artifact(full_label, "args.json")
         
 # ── read results.json (silently ignore if missing) ───────────────────────────
-results_path = exp_dir / "results.json"
-results_dict = {}
-if results_path.exists():
-    with open(results_path, "r", encoding="utf-8") as f:
-        results_dict = json.load(f)
+results_dict = utils.load_json_artifact(full_label, "results.json")
 
 # ───────────────────── sidebar: round slider & autoplay ──────────────────
 # load DataFrame ----------------------------------------------------------------
@@ -446,6 +438,8 @@ with left:
 # Right-hand column: map display (after you compute svg_path, etc.)
 # -------------------------------------------------------------------------
 compressed_pdf = exp_dir / "compressed_graph.pdf"
+if utils.artifact_exists(full_label, "compressed_graph.pdf"):
+    compressed_pdf = utils.STORE.artifact_path(full_label, "compressed_graph.pdf")
 
 if compressed_pdf.exists():
     if "map_variant" not in st.session_state:

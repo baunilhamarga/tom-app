@@ -1,5 +1,12 @@
 activate.sh
 .conda-env
+crossing-501711-5057d9bb3b33.json
+
+# Full experiment artifacts live in object storage. Keep sample_data/ small and
+# tracked for local testing/fallback.
+/data/
+/metadata/
+/.cache/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

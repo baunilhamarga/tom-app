@@ -4,6 +4,8 @@ from __future__ import annotations
 from pathlib import Path
 from functools import lru_cache
 import subprocess, shutil, re
+import base64
+from io import BytesIO
 
 import json, pandas as pd
 import cairosvg                # fallback if pdf2svg CLI is absent
@@ -11,23 +13,75 @@ import cairosvg                # fallback if pdf2svg CLI is absent
 from pdf2image import convert_from_path
 from collections import defaultdict
 
+from experiment_store import ExperimentRef, ExperimentStore
 
 # ──────────────────────────────────────────── global paths & experiment map ──
 ROOT_DATA = Path("./data")
 
-def _discover_experiments(root: Path = ROOT_DATA) -> dict[str, Path]:
+def _discover_experiments(root: Path = ROOT_DATA) -> dict[str, ExperimentRef]:
     """
-    Scan recursively under ROOT_DATA and collect every folder that contains
-    a summary.csv.  Return {"relative/label": Path_to_folder, …}.
+    Discover experiments from Cloud Storage when configured, otherwise from
+    sample_data/ or data/. The root argument is kept for backward
+    compatibility with older app code.
     """
-    exps: dict[str, Path] = {}
-    for csv in root.glob("**/summary.csv"):
-        label = str(csv.parent.relative_to(root))     # e.g. "o3-mini/o3-mini-1/seed0"
-        exps[label] = csv.parent
-    return dict(sorted(exps.items()))                 # alphabetical for convenience
+    global STORE, EXPERIMENTS, DEFAULT_LABEL
+    STORE = ExperimentStore.from_env()
+    EXPERIMENTS = STORE.experiments
+    DEFAULT_LABEL = next(iter(EXPERIMENTS)) if EXPERIMENTS else ""
+    return EXPERIMENTS
 
-EXPERIMENTS: dict[str, Path] = _discover_experiments()
+STORE = ExperimentStore.from_env()
+EXPERIMENTS: dict[str, ExperimentRef] = STORE.experiments
 DEFAULT_LABEL = next(iter(EXPERIMENTS)) if EXPERIMENTS else ""
+
+
+def refresh_experiments() -> dict[str, ExperimentRef]:
+    load_game.cache_clear()
+    load_requests_by_round.cache_clear()
+    pdf_to_png.cache_clear()
+    pdf_to_svg.cache_clear()
+    return _discover_experiments()
+
+
+def get_experiment_dir(label: str) -> Path:
+    ref = STORE.get(label)
+    if ref.source == "local":
+        return Path(ref.artifact_base_uri)
+    path = STORE.cache_dir / label
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _cache_path(label: str, relative_path: str) -> Path:
+    ref = STORE.get(label)
+    if ref.source == "local":
+        return Path(ref.artifact_base_uri) / relative_path
+    return STORE.cache_dir / label / relative_path
+
+
+def artifact_exists(label: str, relative_path: str) -> bool:
+    return STORE.artifact_exists(label, relative_path)
+
+
+def load_json_artifact(label: str, relative_path: str) -> dict:
+    try:
+        return json.loads(STORE.read_text(label, relative_path))
+    except Exception:
+        return {}
+
+
+def _loads_concatenated_json(text: str) -> list[dict]:
+    decoder = json.JSONDecoder()
+    idx = 0
+    rows = []
+    while idx < len(text):
+        while idx < len(text) and text[idx].isspace():
+            idx += 1
+        if idx >= len(text):
+            break
+        obj, idx = decoder.raw_decode(text, idx)
+        rows.append(obj)
+    return rows
 
 
 # ───────────────────────────────────────────────────────────── Loader ────
@@ -49,21 +103,18 @@ def load_game(
     if label not in EXPERIMENTS:
         raise ValueError(f"No experiment named '{label}' in {ROOT_DATA!s}")
 
-    exp_dir = EXPERIMENTS[label]
-
     # ── read the chosen file ──────────────────────────────────────────────
     if source == "jsonl":
-        json_path = exp_dir / "record.jsonl"
-        if not json_path.exists():
-            raise FileNotFoundError(json_path)
-        with open(json_path, "r", encoding="utf-8") as f:
-            rows = [json.loads(line) for line in f if line.strip()]
+        try:
+            text = STORE.read_text(label, "record.jsonl")
+            rows = [json.loads(line) for line in text.splitlines() if line.strip()]
+        except FileNotFoundError:
+            text = STORE.read_text(label, "record.json")
+            rows = _loads_concatenated_json(text)
         df = pd.DataFrame(rows)
 
     elif source == "csv":
-        csv_path = exp_dir / "summary.csv"
-        if not csv_path.exists():
-            raise FileNotFoundError(csv_path)
+        csv_path = STORE.artifact_path(label, "summary.csv")
         df = pd.read_csv(csv_path)
         # drop stray unnamed columns from the legacy writer
         df = df.drop(columns=[c for c in df.columns if c.lower().startswith("unnamed")])
@@ -89,8 +140,9 @@ def load_requests_by_round(label: str) -> dict[tuple[str, int], list[dict]]:
         - next time the leader appears ⇒ new round
     Round counting starts at 1.
     """
-    path = EXPERIMENTS[label] / "chat_log.jsonl"
-    if not path.exists():
+    try:
+        text = STORE.read_text(label, "chat_log.jsonl")
+    except Exception:
         return {}
 
     table      = defaultdict(list)
@@ -98,35 +150,36 @@ def load_requests_by_round(label: str) -> dict[tuple[str, int], list[dict]]:
     leader     = None
     seen_other = False
 
-    with open(path, "r", encoding="utf-8") as f:
-        for line in f:
-            rec   = json.loads(line)
-            agent = rec.get("agent", "unknown")
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        rec   = json.loads(line)
+        agent = rec.get("agent", "unknown")
 
-            # ── use explicit round if present ───────────────────────────
-            if "round" in rec:
-                try:
-                    round_num = int(rec["round"])
-                except (TypeError, ValueError):
-                    round_num = round_i           # fallback if malformed
-                # synchronise heuristic tracker with explicit value
-                round_i    = round_num
-                leader     = agent
-                seen_other = False
-                
+        # ── use explicit round if present ───────────────────────────
+        if "round" in rec:
+            try:
+                round_num = int(rec["round"])
+            except (TypeError, ValueError):
+                round_num = round_i           # fallback if malformed
+            # synchronise heuristic tracker with explicit value
+            round_i    = round_num
+            leader     = agent
+            seen_other = False
 
-            # ── otherwise apply leader/turn heuristic ───────────────────
-            else:
-                if leader is None:
-                    leader = agent
-                elif agent == leader and seen_other:
-                    round_i += 1
-                    leader, seen_other = agent, False
-                elif agent != leader:
-                    seen_other = True
-                round_num = round_i
 
-            table[(agent, round_num)].append(rec)
+        # ── otherwise apply leader/turn heuristic ───────────────────
+        else:
+            if leader is None:
+                leader = agent
+            elif agent == leader and seen_other:
+                round_i += 1
+                leader, seen_other = agent, False
+            elif agent != leader:
+                seen_other = True
+            round_num = round_i
+
+        table[(agent, round_num)].append(rec)
 
     return table
 
@@ -137,11 +190,11 @@ def pdf_to_png(label: str, round_id: int) -> Path:
     Convert round_{round_id}.pdf to PNG (cached) for the given experiment.
     Still here in case some part of the app prefers rasters.
     """
-    render_dir = EXPERIMENTS[label] / "renders"
-    pdf_path   = render_dir / f"round_{round_id}.pdf"
-    png_path   = render_dir / f"round_{round_id}.png"
+    pdf_path   = STORE.artifact_path(label, f"renders/round_{round_id}.pdf")
+    png_path   = _cache_path(label, f"renders/round_{round_id}.png")
 
     if not png_path.exists():
+        png_path.parent.mkdir(parents=True, exist_ok=True)
         pages = convert_from_path(pdf_path, dpi=120)
         pages[0].save(png_path)                       # one-page PDF
     return png_path
@@ -154,20 +207,22 @@ def pdf_to_svg(label: str, round_id: int) -> Path:
     Convert round_{round_id}.pdf to SVG (cached) for the given experiment,
     keeping the map fully vector.
     """
-    render_dir = EXPERIMENTS[label] / "renders"
-    pdf_path   = render_dir / f"round_{round_id}.pdf"
-    svg_path   = render_dir / f"round_{round_id}.svg"
+    ref = STORE.get(label)
+    svg_path = _cache_path(label, f"renders/round_{round_id}.svg")
 
     if svg_path.exists():
         return svg_path
 
-    # (a) Try the pdf2svg CLI if available
-    if shutil.which("pdf2svg"):
-        subprocess.run(["pdf2svg", str(pdf_path), str(svg_path)], check=True)
-    else:
-        # (b) Pure-Python fallback
-        cairosvg.svg_from_pdf(url=str(pdf_path), write_to=str(svg_path))
+    if ref.source != "local":
+        try:
+            return STORE.artifact_path(label, f"renders/round_{round_id}.svg")
+        except Exception:
+            pass
 
+    pdf_path = STORE.artifact_path(label, f"renders/round_{round_id}.pdf")
+    svg_path.parent.mkdir(parents=True, exist_ok=True)
+
+    _convert_pdf_to_svg(pdf_path, svg_path)
     return svg_path
 
 def pdf_to_svg_file(pdf_path: Path) -> Path:
@@ -178,11 +233,32 @@ def pdf_to_svg_file(pdf_path: Path) -> Path:
     if svg_path.exists():
         return svg_path
 
+    _convert_pdf_to_svg(pdf_path, svg_path)
+    return svg_path
+
+
+def _convert_pdf_to_svg(pdf_path: Path, svg_path: Path) -> None:
+    svg_path.parent.mkdir(parents=True, exist_ok=True)
     if shutil.which("pdf2svg"):
         subprocess.run(["pdf2svg", str(pdf_path), str(svg_path)], check=True)
+    elif shutil.which("pdftocairo"):
+        subprocess.run(["pdftocairo", "-svg", str(pdf_path), str(svg_path)], check=True)
     else:
-        cairosvg.svg_from_pdf(url=str(pdf_path), write_to=str(svg_path))
-    return svg_path
+        pages = convert_from_path(pdf_path, dpi=150, first_page=1, last_page=1)
+        image = pages[0]
+        buffer = BytesIO()
+        image.save(buffer, format="PNG")
+        data = base64.b64encode(buffer.getvalue()).decode("ascii")
+        width, height = image.size
+        svg_path.write_text(
+            (
+                f'<svg xmlns="http://www.w3.org/2000/svg" '
+                f'width="{width}" height="{height}" viewBox="0 0 {width} {height}">'
+                f'<image width="{width}" height="{height}" '
+                f'href="data:image/png;base64,{data}"/></svg>'
+            ),
+            encoding="utf-8",
+        )
 
 
 # ─────────────────────────────────────────── SVG width patch helper (unchanged)
