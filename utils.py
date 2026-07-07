@@ -13,10 +13,28 @@ import cairosvg                # fallback if pdf2svg CLI is absent
 from pdf2image import convert_from_path
 from collections import defaultdict
 
-from experiment_store import ExperimentRef, ExperimentStore
+from experiment_store import ExperimentRef, ExperimentStore, resolve_mission_outcome
 
 # ──────────────────────────────────────────── global paths & experiment map ──
 ROOT_DATA = Path("./data")
+
+@lru_cache(maxsize=2)
+def get_store(source: str = "full") -> ExperimentStore:
+    return ExperimentStore.from_source(source)
+
+
+def _clear_artifact_caches() -> None:
+    load_game.cache_clear()
+    load_requests_by_round.cache_clear()
+    pdf_to_png.cache_clear()
+    pdf_to_svg.cache_clear()
+
+
+def refresh_store(source: str = "full") -> ExperimentStore:
+    get_store.cache_clear()
+    _clear_artifact_caches()
+    return get_store(source)
+
 
 def _discover_experiments(root: Path = ROOT_DATA) -> dict[str, ExperimentRef]:
     """
@@ -25,47 +43,51 @@ def _discover_experiments(root: Path = ROOT_DATA) -> dict[str, ExperimentRef]:
     compatibility with older app code.
     """
     global STORE, EXPERIMENTS, DEFAULT_LABEL
-    STORE = ExperimentStore.from_env()
+    get_store.cache_clear()
+    STORE = get_store("full")
     EXPERIMENTS = STORE.experiments
     DEFAULT_LABEL = next(iter(EXPERIMENTS)) if EXPERIMENTS else ""
     return EXPERIMENTS
 
-STORE = ExperimentStore.from_env()
+STORE = get_store("full")
 EXPERIMENTS: dict[str, ExperimentRef] = STORE.experiments
 DEFAULT_LABEL = next(iter(EXPERIMENTS)) if EXPERIMENTS else ""
 
 
 def refresh_experiments() -> dict[str, ExperimentRef]:
-    load_game.cache_clear()
-    load_requests_by_round.cache_clear()
-    pdf_to_png.cache_clear()
-    pdf_to_svg.cache_clear()
+    _clear_artifact_caches()
     return _discover_experiments()
 
 
-def get_experiment_dir(label: str) -> Path:
-    ref = STORE.get(label)
+def get_experiment_dir(label: str, store: ExperimentStore | None = None) -> Path:
+    store = store or STORE
+    ref = store.get(label)
     if ref.source == "local":
         return Path(ref.artifact_base_uri)
-    path = STORE.cache_dir / label
+    path = store.cache_dir / label
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
-def _cache_path(label: str, relative_path: str) -> Path:
-    ref = STORE.get(label)
+def _cache_path(label: str, relative_path: str, store: ExperimentStore | None = None) -> Path:
+    store = store or STORE
+    ref = store.get(label)
     if ref.source == "local":
         return Path(ref.artifact_base_uri) / relative_path
-    return STORE.cache_dir / label / relative_path
+    return store.cache_dir / label / relative_path
 
 
-def artifact_exists(label: str, relative_path: str) -> bool:
-    return STORE.artifact_exists(label, relative_path)
+def artifact_exists(label: str, relative_path: str, store: ExperimentStore | None = None) -> bool:
+    return (store or STORE).artifact_exists(label, relative_path)
 
 
-def load_json_artifact(label: str, relative_path: str) -> dict:
+def load_json_artifact(
+    label: str,
+    relative_path: str,
+    store: ExperimentStore | None = None,
+) -> dict:
     try:
-        return json.loads(STORE.read_text(label, relative_path))
+        return json.loads((store or STORE).read_text(label, relative_path))
     except Exception:
         return {}
 
@@ -89,6 +111,7 @@ def _loads_concatenated_json(text: str) -> list[dict]:
 def load_game(
     label: str | None = None,
     source: str = "jsonl",              # "jsonl"  (default)  or "csv"
+    store: ExperimentStore | None = None,
 ) -> pd.DataFrame:
     """
     Load one experiment into a DataFrame.
@@ -99,22 +122,23 @@ def load_game(
     source  : "jsonl" -> read record.jsonl (preferred, keeps commas/newlines)
               "csv"  -> read summary.csv  (legacy)
     """
-    label = label or DEFAULT_LABEL
-    if label not in EXPERIMENTS:
+    store = store or STORE
+    label = label or next(iter(store.experiments), "")
+    if label not in store.experiments:
         raise ValueError(f"No experiment named '{label}' in {ROOT_DATA!s}")
 
     # ── read the chosen file ──────────────────────────────────────────────
     if source == "jsonl":
         try:
-            text = STORE.read_text(label, "record.jsonl")
+            text = store.read_text(label, "record.jsonl")
             rows = [json.loads(line) for line in text.splitlines() if line.strip()]
         except FileNotFoundError:
-            text = STORE.read_text(label, "record.json")
+            text = store.read_text(label, "record.json")
             rows = _loads_concatenated_json(text)
         df = pd.DataFrame(rows)
 
     elif source == "csv":
-        csv_path = STORE.artifact_path(label, "summary.csv")
+        csv_path = store.artifact_path(label, "summary.csv")
         df = pd.read_csv(csv_path)
         # drop stray unnamed columns from the legacy writer
         df = df.drop(columns=[c for c in df.columns if c.lower().startswith("unnamed")])
@@ -129,7 +153,10 @@ def load_game(
     return df
 
 @lru_cache(maxsize=None)
-def load_requests_by_round(label: str) -> dict[tuple[str, int], list[dict]]:
+def load_requests_by_round(
+    label: str,
+    store: ExperimentStore | None = None,
+) -> dict[tuple[str, int], list[dict]]:
     """
     {(agent, round_id) : [request, …]}
 
@@ -140,8 +167,9 @@ def load_requests_by_round(label: str) -> dict[tuple[str, int], list[dict]]:
         - next time the leader appears ⇒ new round
     Round counting starts at 1.
     """
+    store = store or STORE
     try:
-        text = STORE.read_text(label, "chat_log.jsonl")
+        text = store.read_text(label, "chat_log.jsonl")
     except Exception:
         return {}
 
@@ -185,13 +213,18 @@ def load_requests_by_round(label: str) -> dict[tuple[str, int], list[dict]]:
 
 # ───────────────────────────────────────────────────── PDF ▶ PNG (optional) ─
 @lru_cache(maxsize=None)
-def pdf_to_png(label: str, round_id: int) -> Path:
+def pdf_to_png(
+    label: str,
+    round_id: int,
+    store: ExperimentStore | None = None,
+) -> Path:
     """
     Convert round_{round_id}.pdf to PNG (cached) for the given experiment.
     Still here in case some part of the app prefers rasters.
     """
-    pdf_path   = STORE.artifact_path(label, f"renders/round_{round_id}.pdf")
-    png_path   = _cache_path(label, f"renders/round_{round_id}.png")
+    store = store or STORE
+    pdf_path   = store.artifact_path(label, f"renders/round_{round_id}.pdf")
+    png_path   = _cache_path(label, f"renders/round_{round_id}.png", store)
 
     if not png_path.exists():
         png_path.parent.mkdir(parents=True, exist_ok=True)
@@ -202,24 +235,29 @@ def pdf_to_png(label: str, round_id: int) -> Path:
 
 # ───────────────────────────────────────────────────── PDF ▶ SVG (preferred) ─
 @lru_cache(maxsize=None)
-def pdf_to_svg(label: str, round_id: int) -> Path:
+def pdf_to_svg(
+    label: str,
+    round_id: int,
+    store: ExperimentStore | None = None,
+) -> Path:
     """
     Convert round_{round_id}.pdf to SVG (cached) for the given experiment,
     keeping the map fully vector.
     """
-    ref = STORE.get(label)
-    svg_path = _cache_path(label, f"renders/round_{round_id}.svg")
+    store = store or STORE
+    ref = store.get(label)
+    svg_path = _cache_path(label, f"renders/round_{round_id}.svg", store)
 
     if svg_path.exists():
         return svg_path
 
     if ref.source != "local":
         try:
-            return STORE.artifact_path(label, f"renders/round_{round_id}.svg")
+            return store.artifact_path(label, f"renders/round_{round_id}.svg")
         except Exception:
             pass
 
-    pdf_path = STORE.artifact_path(label, f"renders/round_{round_id}.pdf")
+    pdf_path = store.artifact_path(label, f"renders/round_{round_id}.pdf")
     svg_path.parent.mkdir(parents=True, exist_ok=True)
 
     _convert_pdf_to_svg(pdf_path, svg_path)

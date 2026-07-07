@@ -12,7 +12,8 @@ from typing import Any
 from urllib.parse import unquote, urlparse
 
 
-INDEX_SCHEMA_VERSION = 1
+INDEX_SCHEMA_VERSION = 2
+APP_ROOT = Path(__file__).resolve().parent
 RUN_FILES = (
     "args.json",
     "results.json",
@@ -139,6 +140,72 @@ def _latest_mtime(path: Path) -> str | None:
     return datetime.fromtimestamp(latest, tz=timezone.utc).isoformat()
 
 
+def _file_mtime(path: Path) -> str | None:
+    try:
+        return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).isoformat()
+    except OSError:
+        return None
+
+
+def _earliest_mtime(path: Path) -> str | None:
+    earliest: float | None = None
+    try:
+        for item in path.rglob("*"):
+            if item.is_file():
+                timestamp = item.stat().st_mtime
+                earliest = timestamp if earliest is None else min(earliest, timestamp)
+    except OSError:
+        return None
+    if earliest is None:
+        return None
+    return datetime.fromtimestamp(earliest, tz=timezone.utc).isoformat()
+
+
+def run_started_at(ref: "ExperimentRef") -> datetime | None:
+    """Return a run's best available UTC timestamp, including old indexes."""
+    value = ref.metadata.get("started_at") or ref.metadata.get("updated_at")
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def resolve_mission_outcome(
+    results: dict[str, Any],
+    ref: "ExperimentRef",
+    legacy_target: int = 90,
+) -> dict[str, Any] | None:
+    """Prefer explicit mission data and conservatively support legacy runs."""
+    mission = results.get("mission")
+    if isinstance(mission, dict) and isinstance(mission.get("success"), bool):
+        return {**mission, "inferred": False}
+
+    score = results.get("score", ref.metadata.get("score"))
+    try:
+        numeric_score = float(score)
+    except (TypeError, ValueError):
+        return None
+
+    success = numeric_score >= legacy_target
+    return {
+        "success": success,
+        "status": "accomplished" if success else "failed",
+        "reason_code": "legacy_score_target",
+        "reason": (
+            f"Final score reached the legacy target of {legacy_target}."
+            if success
+            else f"Final score {numeric_score:g} did not reach the legacy target of {legacy_target}."
+        ),
+        "max_score": legacy_target,
+        "inferred": True,
+    }
+
+
 def build_index_records(
     data_root: str | Path,
     artifact_uri_prefix: str | None = None,
@@ -173,6 +240,19 @@ def build_index_records(
             artifacts["renders_dir"] = _uri_join(base_uri, "renders")
 
         summary_stats = _summary_stats(summary_path)
+        started_at = (
+            results.get("started_at")
+            or args.get("started_at")
+            or _file_mtime(run_dir / "args.json")
+            or _file_mtime(summary_path)
+            or _earliest_mtime(run_dir)
+        )
+        completed_at = (
+            results.get("completed_at")
+            or _file_mtime(run_dir / "results.json")
+            or _latest_mtime(run_dir)
+        )
+        mission = results.get("mission") if isinstance(results.get("mission"), dict) else {}
         record = {
             "schema_version": INDEX_SCHEMA_VERSION,
             "label": label,
@@ -189,6 +269,12 @@ def build_index_records(
             "prompt_tokens": results.get("prompt_tokens"),
             "completion_tokens": results.get("completion_tokens"),
             "total_tokens": results.get("total_tokens"),
+            "started_at": started_at,
+            "completed_at": completed_at,
+            "mission_success": mission.get("success"),
+            "mission_status": mission.get("status"),
+            "mission_reason_code": mission.get("reason_code"),
+            "max_score": mission.get("max_score"),
             "updated_at": _latest_mtime(run_dir),
             "artifact_base_uri": base_uri,
             "artifacts": artifacts,
@@ -225,6 +311,12 @@ def write_index_records(records: list[dict[str, Any]], output_dir: str | Path) -
         "prompt_tokens",
         "completion_tokens",
         "total_tokens",
+        "started_at",
+        "completed_at",
+        "mission_success",
+        "mission_status",
+        "mission_reason_code",
+        "max_score",
         "updated_at",
         "artifact_base_uri",
         "render_count",
@@ -359,6 +451,35 @@ class ExperimentStore:
         return cls._local_from_env(cache_dir=cache_dir)
 
     @classmethod
+    def from_source(cls, source: str) -> "ExperimentStore":
+        """Build the configured full store or the repository sample store."""
+        if source == "sample":
+            sample_root = Path(_env("TOM_APP_SAMPLE_ROOT", default=str(APP_ROOT / "data")) or APP_ROOT / "data")
+            cache_dir = _env("TOM_APP_CACHE_DIR", default=".cache/tom-app") or ".cache/tom-app"
+            return cls.from_local_root(sample_root, cache_dir=cache_dir, backend_prefix="sample")
+        if source != "full":
+            raise ValueError("source must be 'full' or 'sample'")
+        return cls.from_env()
+
+    @classmethod
+    def from_local_root(
+        cls,
+        root: str | Path,
+        cache_dir: str | Path = ".cache/tom-app",
+        backend_prefix: str = "local",
+        fallback_error: str | None = None,
+    ) -> "ExperimentStore":
+        root = Path(root)
+        records = build_index_records(root)
+        refs = {record["label"]: _ref_from_record(record, "local") for record in records}
+        return cls(
+            refs,
+            f"{backend_prefix}:{root.as_posix()}",
+            cache_dir=cache_dir,
+            fallback_error=fallback_error,
+        )
+
+    @classmethod
     def _local_from_env(cls, cache_dir: str | Path, fallback_error: str | None = None) -> "ExperimentStore":
         explicit_root = _env("TOM_APP_DATA_ROOT")
         if explicit_root:
@@ -369,8 +490,7 @@ class ExperimentStore:
         for root in roots:
             records = build_index_records(root)
             if records:
-                refs = {record["label"]: _ref_from_record(record, "local") for record in records}
-                return cls(refs, f"local:{root.as_posix()}", cache_dir=cache_dir, fallback_error=fallback_error)
+                return cls.from_local_root(root, cache_dir=cache_dir, fallback_error=fallback_error)
         return cls({}, "local:empty", cache_dir=cache_dir, fallback_error=fallback_error)
 
     def refresh(self) -> "ExperimentStore":
