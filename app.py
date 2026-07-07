@@ -238,58 +238,63 @@ round_ids = sorted(df["round"].unique())
 if "round" not in st.session_state or st.session_state.round not in round_ids:
     st.session_state.round = round_ids[0]
 
-# ───────── round selector (multi-control, no post-write) ──────────
+# ───────── round selector ──────────
 if len(round_ids) == 1:
     st.sidebar.markdown(f"**Round:** {round_ids[0]}")
 else:
-    # canonical value we’ll update below
-    cur_round = st.session_state.round
+    def set_round(round_id: int) -> None:
+        """Update the canonical round and keep every selector in sync."""
+        st.session_state.round = int(round_id)
+        st.session_state.round_slider = int(round_id)
+        st.session_state.round_input = int(round_id)
+
+    def select_slider_round() -> None:
+        set_round(st.session_state.round_slider)
+
+    def select_input_round() -> None:
+        set_round(st.session_state.round_input)
+
+    def step_round(offset: int) -> None:
+        current_index = round_ids.index(st.session_state.round)
+        new_index = min(max(current_index + offset, 0), len(round_ids) - 1)
+        set_round(round_ids[new_index])
+
+    # Widget keys persist independently, so reset them from the canonical value
+    # before rendering. Their callbacks update all three values atomically.
+    if st.session_state.get("round_slider") != st.session_state.round:
+        st.session_state.round_slider = st.session_state.round
+    if st.session_state.get("round_input") != st.session_state.round:
+        st.session_state.round_input = st.session_state.round
 
     # slider --------------------------------------------------------
-    slider_val = st.sidebar.slider(
+    st.sidebar.slider(
         "Round",
         min_value=round_ids[0],
         max_value=round_ids[-1],
-        value=cur_round,
         key="round_slider",
         step=1,
         format="%d",
+        on_change=select_slider_round,
     )
 
     # prev | number | next -----------------------------------------
     prev_col, num_col, next_col = st.sidebar.columns([1, 2, 1])
 
     with prev_col:
-        prev_clicked = st.button("◀", key="prev_round")
+        st.button("◀", key="prev_round", on_click=step_round, args=(-1,))
 
     with next_col:
-        next_clicked = st.button("▶", key="next_round")
+        st.button("▶", key="next_round", on_click=step_round, args=(1,))
 
     with num_col:
-        num_val = st.number_input(
+        st.number_input(
             label=" ",
             min_value=round_ids[0],
             max_value=round_ids[-1],
-            value=cur_round,
             step=1,
             key="round_input",
+            on_change=select_input_round,
         )
-
-    # ---------- decide the new round ------------------------------
-    new_round = cur_round
-    if prev_clicked:
-        new_round = max(round_ids[0], cur_round - 1)
-    elif next_clicked:
-        new_round = min(round_ids[-1], cur_round + 1)
-    elif num_val != cur_round:
-        new_round = int(num_val)          # typed value
-    elif slider_val != cur_round:
-        new_round = int(slider_val)       # dragged slider
-
-    # if something changed: update & rerun so widgets re-sync
-    if new_round != cur_round:
-        st.session_state.round = new_round
-        st.rerun()
 
 
     # autoplay ------------------------------------------------------
